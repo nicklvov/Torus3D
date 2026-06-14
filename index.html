@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>VR 3-Torus — Стабильные сквозные порталы (без мерцания)</title>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #000;
+      }
+      canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      #info {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: white;
+        font-family: Arial, sans-serif;
+        background: rgba(0, 0, 0, 0.7);
+        padding: 12px;
+        border-radius: 8px;
+        z-index: 100;
+        max-width: 400px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="info">
+      <b>3-Torus — стабильные порталы</b><br />
+      WASD / Стрелки — движение<br />
+      Мышь — обзор | Space/Shift — вверх/вниз<br />
+      VR: WebXR
+    </div>
+    <canvas id="renderCanvas"></canvas>
+
+    <script>
+      const canvas = document.getElementById("renderCanvas");
+      const engine = new BABYLON.Engine(canvas, true, {
+        preserveDrawingBuffer: true,
+        stencil: true,
+      });
+
+      const createScene = async function () {
+        const scene = new BABYLON.Scene(engine);
+        scene.clearColor = new BABYLON.Color4(0.02, 0.02, 0.08, 1);
+
+        // Основная камера
+        const camera = new BABYLON.FreeCamera(
+          "camera",
+          new BABYLON.Vector3(0, 2, 0),
+          scene,
+        );
+        camera.attachControl(canvas, true);
+        camera.minZ = 0.05;
+        camera.speed = 0.4;
+        camera.angularSensibility = 700;
+        camera.keysUp.push(32);
+        camera.keysDown.push(16);
+
+        // Освещение
+        const hemi = new BABYLON.HemisphericLight(
+          "hemi",
+          new BABYLON.Vector3(0, 1, 0),
+          scene,
+        );
+        hemi.intensity = 0.8;
+        const dirLight = new BABYLON.DirectionalLight(
+          "dir",
+          new BABYLON.Vector3(-0.5, -1, -0.8),
+          scene,
+        );
+        dirLight.intensity = 0.7;
+
+        const size = 20;
+        const half = size / 2;
+
+        // Комната
+        const room = BABYLON.MeshBuilder.CreateBox(
+          "room",
+          { width: size, height: size, depth: size },
+          scene,
+        );
+        room.position.y = half;
+        const roomMat = new BABYLON.StandardMaterial("roomMat", scene);
+        roomMat.diffuseColor = new BABYLON.Color3(0.08, 0.12, 0.28);
+        roomMat.backFaceCulling = false;
+        room.material = roomMat;
+
+        const floor = BABYLON.MeshBuilder.CreateGround(
+          "floor",
+          { width: size * 1.05, height: size * 1.05 },
+          scene,
+        );
+        floor.position.y = 0.02;
+        const floorMat = new BABYLON.StandardMaterial("floorMat", scene);
+        floorMat.diffuseColor = new BABYLON.Color3(0.2, 0.5, 0.35);
+        floor.material = floorMat;
+
+        // Объекты
+        for (let i = 0; i < 15; i++) {
+          const obj =
+            Math.random() > 0.5
+              ? BABYLON.MeshBuilder.CreateSphere(
+                  "s" + i,
+                  { diameter: 1.5 },
+                  scene,
+                )
+              : BABYLON.MeshBuilder.CreateBox("b" + i, { size: 1.6 }, scene);
+          obj.position.set(
+            (Math.random() - 0.5) * (size - 8),
+            1 + Math.random() * (size - 5),
+            (Math.random() - 0.5) * (size - 8),
+          );
+          const mat = new BABYLON.StandardMaterial("m" + i, scene);
+          mat.diffuseColor = new BABYLON.Color3(
+            Math.random() * 0.6 + 0.4,
+            Math.random() * 0.7 + 0.3,
+            Math.random() * 0.8 + 0.2,
+          );
+          obj.material = mat;
+        }
+
+        // RTT
+        const rttSize = 768; // уменьшил для стабильности
+        const rttX = new BABYLON.RenderTargetTexture("rttX", rttSize, scene);
+        const rttY = new BABYLON.RenderTargetTexture("rttY", rttSize, scene);
+        const rttZ = new BABYLON.RenderTargetTexture("rttZ", rttSize, scene);
+
+        const exclude = scene.meshes.filter((m) => m !== room);
+        [rttX, rttY, rttZ].forEach((rtt) => (rtt.renderList = exclude));
+
+        // Материалы
+        const createMat = (rtt) => {
+          const mat = new BABYLON.StandardMaterial("pMat", scene);
+          mat.diffuseTexture = rtt;
+          mat.emissiveTexture = rtt;
+          mat.disableLighting = true;
+          return mat;
+        };
+
+        const matX = createMat(rttX);
+        const matY = createMat(rttY);
+        const matZ = createMat(rttZ);
+
+        // Порталы
+        const createPortal = (name, pos, rot, mat) => {
+          const p = BABYLON.MeshBuilder.CreatePlane(
+            name,
+            { width: size * 0.92, height: size * 0.92 },
+            scene,
+          );
+          p.position = pos;
+          if (rot) p.rotation = rot;
+          p.material = mat;
+          p.isPickable = false;
+          return p;
+        };
+
+        // X
+        createPortal(
+          "px1",
+          new BABYLON.Vector3(half, half, 0),
+          new BABYLON.Vector3(0, Math.PI / 2, 0),
+          matX,
+        );
+        createPortal(
+          "px2",
+          new BABYLON.Vector3(-half, half, 0),
+          new BABYLON.Vector3(0, -Math.PI / 2, 0),
+          matX,
+        );
+        // Z
+        createPortal(
+          "pz1",
+          new BABYLON.Vector3(0, half, half),
+          BABYLON.Vector3.Zero(),
+          matZ,
+        );
+        createPortal(
+          "pz2",
+          new BABYLON.Vector3(0, half, -half),
+          new BABYLON.Vector3(0, Math.PI, 0),
+          matZ,
+        );
+        // Y
+        createPortal(
+          "py1",
+          new BABYLON.Vector3(0, size, 0),
+          new BABYLON.Vector3(Math.PI / 2, 0, 0),
+          matY,
+        );
+        createPortal(
+          "py2",
+          new BABYLON.Vector3(0, 0, 0),
+          new BABYLON.Vector3(-Math.PI / 2, 0, 0),
+          matY,
+        );
+
+        // Скрытые камеры для RTT
+        const camX = camera.clone("camX");
+        const camY = camera.clone("camY");
+        const camZ = camera.clone("camZ");
+        [camX, camY, camZ].forEach((c) => c.setEnabled(false));
+
+        // Бесшовное оборачивание
+        scene.registerBeforeRender(() => {
+          const pos = camera.position;
+          if (pos.x > half) pos.x -= size;
+          else if (pos.x < -half) pos.x += size;
+          if (pos.z > half) pos.z -= size;
+          else if (pos.z < -half) pos.z += size;
+          if (pos.y > size) pos.y -= size;
+          else if (pos.y < 0) pos.y += size;
+        });
+
+        // Обновление порталов (реже + отдельные камеры)
+        let counter = 0;
+        scene.onBeforeRenderObservable.add(() => {
+          counter++;
+          if (counter % 3 !== 0) return; // обновление ~20-30 FPS
+
+          const origPos = camera.position.clone();
+          const origRot = camera.rotation.clone();
+
+          // X
+          camX.position = origPos.clone();
+          camX.position.x += size;
+          camX.rotation = origRot;
+          rttX.render();
+          camX.position.x -= 2 * size;
+          rttX.render();
+
+          // Z
+          camZ.position = origPos.clone();
+          camZ.position.z += size;
+          camZ.rotation = origRot;
+          rttZ.render();
+          camZ.position.z -= 2 * size;
+          rttZ.render();
+
+          // Y
+          camY.position = origPos.clone();
+          camY.position.y += size;
+          camY.rotation = origRot;
+          rttY.render();
+          camY.position.y -= 2 * size;
+          rttY.render();
+
+          camera.position = origPos; // на всякий случай
+        });
+
+        // WebXR
+        try {
+          await scene.createDefaultXRExperienceAsync({
+            floorMeshes: [floor],
+            disableTeleportation: true,
+          });
+        } catch (e) {}
+
+        return scene;
+      };
+
+      createScene().then((scene) => {
+        engine.runRenderLoop(() => scene.render());
+      });
+
+      window.addEventListener("resize", () => engine.resize());
+    </script>
+  </body>
+</html>
